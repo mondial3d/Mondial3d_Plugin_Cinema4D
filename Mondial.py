@@ -1,14 +1,11 @@
 import os
-import sys
 import tempfile
+import fnmatch
 from urllib import request, error
 import json
+import subprocess
 import c4d
 from c4d import gui
-
-# sys.path.append("C:/Users/saleh/OneDrive/Documents/Work/Cinema 4D Plugin/pygltflib-1.16.1/pygltflib")
-# from pygltflib import GLTF2, GLB
-
 
 auth_token=""
 user_email=""
@@ -148,7 +145,7 @@ class Mondial(gui.GeDialog):
         else:
             return response
 
-    def AIPromptSceneDownload(self, link):
+    def DownloadGLB(self, link):
         try:
             # Download the .glb file
             response = request.urlopen(link)
@@ -161,6 +158,14 @@ class Mondial(gui.GeDialog):
         except Exception as e:
             c4d.gui.MessageDialog(str(e))
             return None
+
+    def FindBlenderPath(self, pattern='blender.exe', path='C:\\'):
+        for root, dirs, files in os.walk(path):
+            for name in files:
+                if fnmatch.fnmatch(name, pattern):
+                    blender_path = os.path.join(root, name)
+                    return blender_path.replace("\\", "/")
+
 
     def Command(self, id, msg):
         global auth_token
@@ -198,9 +203,28 @@ class Mondial(gui.GeDialog):
                 return True
 
         elif id == self.AI_DOWNLOAD_BUTTON:
-            save_path = self.AIPromptSceneDownload(self.AI_LINK)
-            print(save_path)
-            return True
+            glb_save_path= self.DownloadGLB(self.AI_LINK)
+
+            script_path = os.path.join(os.getcwd(), "ConvertGLBtoFBX.py")
+            script_path= script_path.replace("\\", "/")
+            print(script_path)
+
+            blender_path= self.FindBlenderPath()
+
+            cmd = [
+                f'"{blender_path}"', 
+                '--background', 
+                '--python', 
+                f'"{script_path}"', 
+                f'"{glb_save_path}"'
+            ]
+            try:
+                result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                print(result.stdout.decode('utf-8'))
+                return True
+            except subprocess.CalledProcessError as e:
+                print(f"An error occurred while converting .glb to .fbx: {str(e)}")
+                print(e.stderr.decode('utf-8'))
 
     def DestroyDialog(self):
         self.DestroyWindow()
