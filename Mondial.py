@@ -11,9 +11,13 @@ auth_token=""
 user_email=""
 temp_dir = tempfile.gettempdir()
 
-def send_request(url, headers):
+def send_request(url, headers=None):
     try:
-        req = request.Request(url, headers=headers)
+        if headers and len(headers) > 0:
+            req = request.Request(url, headers=headers)
+        else:
+            req = request.Request(url)
+
         response = request.urlopen(req)
         data= response.read().decode()
         return json.loads(data)
@@ -191,7 +195,8 @@ class Mondial(gui.GeDialog):
             for item in data:
                 image_url = image_base_url + item["imageAdress"]
                 save_path = os.path.join(temp_dir, item["imageAdress"])
-                response = request.urlopen(image_url)
+                req = request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
+                response = request.urlopen(req)
                 with open(save_path, 'wb') as f:
                     f.write(response.read())
                 save_paths.append(save_path)
@@ -258,16 +263,23 @@ class Mondial(gui.GeDialog):
                 print(e.stderr.decode('utf-8'))
                 return False
         
-        elif id ==self.MARKETPLACE_ACTIVATE:
-            save_paths=self.GetMarketplaceInfo()
+        elif id == self.MARKETPLACE_ACTIVATE:
+            save_paths = self.GetMarketplaceInfo()
             if save_paths is not None:
                 self.LayoutFlushGroup(10003)
                 for i, save_path in enumerate(save_paths):
-                    # Load image into a bitmap
+                    save_path = str(save_path).replace("\\", "/")
+                    if not os.path.isfile(save_path):
+                        print(f"File does not exist at {save_path}")
+                        continue
+                    elif not os.access(save_path, os.R_OK):
+                        print(f"File exists but is not readable at {save_path}")
+                        continue
+
                     bmp = c4d.bitmaps.BaseBitmap()
                     result = bmp.InitWith(save_path)
                     if result != c4d.IMAGERESULT_OK:
-                        print(f"Failed to load image at {save_path}")
+                        print(f"Failed to load image at {save_path}. Error code: {result}")
                         continue
 
                     # Add bitmap to layout
