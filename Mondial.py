@@ -108,6 +108,9 @@ class Mondial(gui.GeDialog):
     AI_LOAD= False
     AI_LABEL= []
     AI_LINK= ""
+    MARKETPLACE= 1005
+    MARKETPLACE_ACTIVATE= 1006
+    PAGEID= 1
 
     def CreateLayout(self):
         self.SetTitle("Mondial3d.com")
@@ -133,9 +136,16 @@ class Mondial(gui.GeDialog):
         self.GroupEnd()
         self.AddSeparatorH(c4d.BFH_SCALEFIT)
 
+        #Marketplace
+        self.AddStaticText(self.MARKETPLACE, flags=c4d.BFH_CENTER, name="Marketplace", borderstyle=c4d.BORDER_WITH_TITLE_BOLD)
+        self.AddButton(self.MARKETPLACE_ACTIVATE, flags=c4d.BFH_SCALEFIT, name="Activate Marketplace")
+        self.GroupBegin(id=10003, flags=c4d.BFH_SCALEFIT, cols=1, rows=1)
+        self.GroupEnd()
+        self.AddSeparatorH(c4d.BFH_SCALEFIT)
+
         return True
     
-    def AIPromptScene(self, prompt):
+    def AIPromptScene(self, prompt, auth_token):
         base_url=f"https://api.mondial3d.studio/api/Nft/ai-Add-complete-scene?categoryName={prompt}"
         headers = {"Authorization" : "Bearer "+ auth_token}
         response = send_request(base_url, headers)
@@ -144,7 +154,7 @@ class Mondial(gui.GeDialog):
             return None
         else:
             return response
-
+    
     def DownloadGLB(self, link):
         try:
             # Download the .glb file
@@ -152,7 +162,7 @@ class Mondial(gui.GeDialog):
             save_path = os.path.join(temp_dir, "ai.glb")
             with open(save_path, 'wb') as f:
                 f.write(response.read())
-
+            save_path= str(save_path).replace("\\", "/")
             return save_path
         
         except Exception as e:
@@ -166,9 +176,31 @@ class Mondial(gui.GeDialog):
                     blender_path = os.path.join(root, name)
                     return blender_path.replace("\\", "/")
 
+    def GetMarketplaceInfo(self):
+        save_paths= []
+        base_url=f"https://api.mondial3d.studio/api/Nft/blendernfts?pageid={self.PAGEID}&take=3"
+        headers = {}
+        response= send_request(base_url, headers)
+        if isinstance(response, str) and (response.startswith("HTTP Error") or response.startswith("URL Error") or response.startswith("An error occurred")):
+            c4d.gui.MessageDialog(response)
+            return None
+        else:
+            data= response["listNFTs"]
+            image_base_url = "https://cdn.mondial3d.com/"
+
+            for item in data:
+                image_url = image_base_url + item["imageAdress"]
+                save_path = os.path.join(temp_dir, item["imageAdress"])
+                response = request.urlopen(image_url)
+                with open(save_path, 'wb') as f:
+                    f.write(response.read())
+                save_paths.append(save_path)
+                return save_paths
+
 
     def Command(self, id, msg):
         global auth_token
+
         if id == self.SIGNOUT_BUTTON:
             for dialog in dialogs.dialogs:
                 dialog.Close()
@@ -187,7 +219,7 @@ class Mondial(gui.GeDialog):
                 return False
             else:
                 prompt = prompt.replace(" ", "_")
-                response = self.AIPromptScene(prompt)
+                response = self.AIPromptScene(prompt, auth_token)
 
                 response = response["completeScene"]
                 label = response["labels"]
@@ -204,27 +236,47 @@ class Mondial(gui.GeDialog):
 
         elif id == self.AI_DOWNLOAD_BUTTON:
             glb_save_path= self.DownloadGLB(self.AI_LINK)
+            print(glb_save_path)
+            fbx_save_path= glb_save_path.replace(".glb", ".fbx")
+            print(fbx_save_path)
 
             script_path = os.path.join(os.getcwd(), "ConvertGLBtoFBX.py")
             script_path= script_path.replace("\\", "/")
             print(script_path)
 
             blender_path= self.FindBlenderPath()
+            print(blender_path)
+            cmd = [blender_path, '--background', '--python', script_path, '--', glb_save_path]
 
-            cmd = [
-                f'"{blender_path}"', 
-                '--background', 
-                '--python', 
-                f'"{script_path}"', 
-                f'"{glb_save_path}"'
-            ]
             try:
-                result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                result = subprocess.run(cmd, check=True, capture_output=True)
                 print(result.stdout.decode('utf-8'))
-                return True
+                c4d.documents.LoadFile(fbx_save_path)
+
             except subprocess.CalledProcessError as e:
                 print(f"An error occurred while converting .glb to .fbx: {str(e)}")
                 print(e.stderr.decode('utf-8'))
+                return False
+        
+        elif id ==self.MARKETPLACE_ACTIVATE:
+            save_paths=self.GetMarketplaceInfo()
+            if save_paths is not None:
+                self.LayoutFlushGroup(10003)
+                for i, save_path in enumerate(save_paths):
+                    # Load image into a bitmap
+                    bmp = c4d.bitmaps.BaseBitmap()
+                    result = bmp.InitWith(save_path)
+                    if result != c4d.IMAGERESULT_OK:
+                        print(f"Failed to load image at {save_path}")
+                        continue
+
+                    # Add bitmap to layout
+                    self.AddStaticBitmap(i + 2000, flags=c4d.BFH_SCALEFIT, bmp=bmp)
+                self.LayoutChanged(10003)
+            return True
+            
+
+            
 
     def DestroyDialog(self):
         self.DestroyWindow()
