@@ -139,6 +139,7 @@ class Mondial(gui.GeDialog):
     def __init__(self):
         self.HEADER= 999
         self.SIGNOUT_BUTTON= 1000
+
         self.AI_HEADER= 1001
         self.AI_PROMPT= 1002
         self.AI_BUTTTON= 1003
@@ -146,13 +147,17 @@ class Mondial(gui.GeDialog):
         self.AI_LOAD= False
         self.AI_LABEL= []
         self.AI_LINK= ""
+        
         self.MARKETPLACE= 1005
         self.MARKETPLACE_ACTIVATE= 1006
+        self.MARKETPLACE_NEXT=1007
+        self.MARKETPLACE_PREVIOUS=1008
+        self.MARKETPLACE_SEARCH= 1009
+        self.MARKETPLACE_SEARCH_SUBMIT= 1010
         self.PAGEID= 1
         self.user_areas = []
         self.marketplace_model_url=[]
         self.marketplace_activated = False
-
 
     def CreateLayout(self):
         self.SetTitle("Mondial3d.com")
@@ -202,7 +207,6 @@ class Mondial(gui.GeDialog):
     
     def DownloadGLB(self, link):
         try:
-            # Download the .glb file
             response = request.urlopen(link)
             save_path = os.path.join(temp_dir, "ai.glb")
             with open(save_path, 'wb') as f:
@@ -249,19 +253,46 @@ class Mondial(gui.GeDialog):
     def HandleMarketPlaceDraw(self):
         save_paths = self.GetMarketplaceInfo()
         self.user_areas=[]
+
         if save_paths:
+            # Main group
             self.LayoutFlushGroup(10003)
-            self.GroupBegin(id=10003, flags=c4d.BFH_SCALEFIT, cols=2, rows=len(save_paths)//2 + len(save_paths)%2)
+            self.GroupBegin(id=10003, flags=c4d.BFH_SCALEFIT, cols=1, rows=2)
+
+            # Searchbar
+            self.GroupBegin(id=10004, flags=c4d.BFH_SCALEFIT, cols=2, rows=1) 
+            self.GroupBorderSpace(10, 10, 10, 10)
+            self.AddEditText(self.MARKETPLACE_SEARCH, flags= c4d.BFH_SCALEFIT, initw=200)
+            self.AddButton(self.MARKETPLACE_SEARCH_SUBMIT, flags=c4d.BFH_RIGHT, name="Search")
+            self.GroupEnd()
+
+            # Navigation
+            self.GroupBegin(id=10005, flags=c4d.BFH_SCALEFIT, cols=2, rows=1) 
+            self.GroupBorderSpace(10, 10, 10, 10)
+            if self.PAGEID == 1:
+                self.AddButton(self.MARKETPLACE_NEXT, c4d.BFH_SCALEFIT, name="Next")
+            else:
+                self.AddButton(self.MARKETPLACE_PREVIOUS, c4d.BFH_SCALEFIT, name="Prev")
+                self.AddButton(self.MARKETPLACE_NEXT, c4d.BFH_SCALEFIT, name="Next")
+            self.GroupEnd()
+
+            # Items
+            self.GroupBegin(id=10006, flags=c4d.BFH_SCALEFIT, cols=2, rows=len(save_paths)//2 + len(save_paths)%2)
             if not self.user_areas:
                 self.user_areas = [MyUserArea(path) for path in save_paths]
                 for index, user_area in enumerate(self.user_areas):
-                    self.GroupBegin(id=10004+index, flags=c4d.BFH_SCALEFIT, cols=1, rows=2) 
+                    self.GroupBegin(id=10007+index, flags=c4d.BFH_SCALEFIT, cols=1, rows=2) 
+                    self.GroupBorderSpace(5, 5, 5, 5)
                     self.AddUserArea(200 + index, c4d.BFH_SCALEFIT)
                     self.AttachUserArea(user_area, 200 + index)
                     user_area.Redraw()
                     self.AddButton(300 + index, c4d.BFH_SCALEFIT, name="Download and Load Model")
                     self.GroupEnd() 
             self.GroupEnd()
+
+            # End main group
+            self.GroupEnd()
+
             self.LayoutChanged(10003)
             self.marketplace_activated = True 
 
@@ -269,17 +300,26 @@ class Mondial(gui.GeDialog):
         return False
     
     def GetMarketPlaceModel(self, i):
+        
         url= f"https://api.mondial3d.studio/api/Nft/Download3D?URL={self.marketplace_model_url[i]}"
         req = request.Request(url)
         response = request.urlopen(req)
+        print(response)
         save_path = os.path.join(temp_dir, "{}.glb".format(self.marketplace_model_url[i]))
         with open(save_path, 'wb') as f:
             f.write(response.read())
         save_path= str(save_path).replace("\\", "/")
-        print(save_path)
+
+        if os.path.exists(save_path) and os.path.getsize(save_path) > 15:
+            print(f"File has been downloaded and saved to path: {save_path}")
+        else:
+            print("File download failed or file is empty.")
+            return None
+        
         return save_path
 
-
+    
+    
     def Command(self, id, msg):
         global auth_token
 
@@ -341,9 +381,10 @@ class Mondial(gui.GeDialog):
             if not self.marketplace_activated:
                 return self.HandleMarketPlaceDraw()
 
-        elif id>= 300 or id <= 304:
+        elif id >= 300 or id <= 304:
             glb_save_path=self.GetMarketPlaceModel((id-300))
             fbx_save_path= glb_save_path.replace(".glb", ".fbx")
+            print(glb_save_path)
 
             script_path = os.path.join(os.getcwd(), "ConvertGLBtoFBX.py")
             script_path= script_path.replace("\\", "/")
@@ -361,6 +402,18 @@ class Mondial(gui.GeDialog):
                 print(f"An error occurred while converting .glb to .fbx: {str(e)}")
                 print(e.stderr.decode('utf-8'))
                 return False
+
+        elif id == self.MARKETPLACE_PREVIOUS:
+            if self.PAGEID > 1:
+                self.PAGEID -= 1
+                return self.HandleMarketPlaceDraw()
+        
+        elif id == self.MARKETPLACE_NEXT:
+            self.PAGEID += 1
+            return self.HandleMarketPlaceDraw()
+            
+
+
 
     def DestroyDialog(self):
         self.DestroyWindow()
