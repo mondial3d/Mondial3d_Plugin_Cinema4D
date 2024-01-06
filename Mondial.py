@@ -159,7 +159,6 @@ class Mondial(gui.GeDialog):
         self.marketplace_model_url=[]
         self.search_labels=[]
         self.search_label= ""
-        self.marketplace_activated = False
 
     def CreateLayout(self):
         self.SetTitle("Mondial3d.com")
@@ -251,7 +250,7 @@ class Mondial(gui.GeDialog):
             
         return self.search_label
     
-    def GetMarketplaceInfo(self, search_label= None):
+    def GetMarketplaceInfo(self, search_label):
         save_paths= []
         self.marketplace_model_url= []
         if not search_label == "":
@@ -259,6 +258,7 @@ class Mondial(gui.GeDialog):
         else:
             base_url=f"https://api.mondial3d.studio/api/Nft/blendernfts?pageid={self.PAGEID}&take=4"
         headers = {}
+        print(base_url)
         response= send_request(base_url, headers)
         if isinstance(response, str) and (response.startswith("HTTP Error") or response.startswith("URL Error") or response.startswith("An error occurred")):
             c4d.gui.MessageDialog(response)
@@ -266,7 +266,6 @@ class Mondial(gui.GeDialog):
         else:
             data= response["listNFTs"]
             image_base_url = "https://cdn.mondial3d.com/"
-
 
             for item in data:
                 image_url = image_base_url + item["imageAdress"]
@@ -281,10 +280,7 @@ class Mondial(gui.GeDialog):
             return save_paths
 
     def HandleMarketPlaceDraw(self, search_label= None):
-        if not search_label == "":
-            save_paths = self.GetMarketplaceInfo(search_label)
-        else:
-            save_paths = self.GetMarketplaceInfo()
+        save_paths = self.GetMarketplaceInfo(search_label)
         self.user_areas=[]
 
         if save_paths:
@@ -322,12 +318,9 @@ class Mondial(gui.GeDialog):
                     self.AddButton(300 + index, c4d.BFH_SCALEFIT, name="Download and Load Model")
                     self.GroupEnd() 
             self.GroupEnd()
-
             # End main group
             self.GroupEnd()
-
             self.LayoutChanged(10003)
-            self.marketplace_activated = True 
 
             return True
         return False
@@ -335,8 +328,9 @@ class Mondial(gui.GeDialog):
     def GetMarketPlaceModel(self, i):
         
         url= f"https://api.mondial3d.studio/api/Nft/Download3D?URL={self.marketplace_model_url[i]}"
-        req = request.Request(url)
-        response = request.urlopen(req)
+        response = request.urlopen(url)
+        download_url = response.read().decode('utf-8')
+        response = request.urlopen(download_url)
 
         save_path = os.path.join(temp_dir, "{}.glb".format(self.marketplace_model_url[i]))
         with open(save_path, 'wb') as f:
@@ -351,8 +345,6 @@ class Mondial(gui.GeDialog):
         
         return save_path
 
-
-    
     def Command(self, id, msg):
         global auth_token
 
@@ -397,7 +389,7 @@ class Mondial(gui.GeDialog):
             script_path= script_path.replace("\\", "/")
 
             blender_path= self.FindBlenderPath()
-            print(blender_path)
+
             cmd = [blender_path, '--background', '--python', script_path, '--', glb_save_path]
 
             try:
@@ -412,19 +404,17 @@ class Mondial(gui.GeDialog):
         
         elif id == self.MARKETPLACE_ACTIVATE:
             self.GetSearchLabel()
-            if not self.marketplace_activated:
-                return self.HandleMarketPlaceDraw(self.search_label)
+            return self.HandleMarketPlaceDraw(self.search_label)
 
         elif id >= 300 and id <= 304:
             glb_save_path=self.GetMarketPlaceModel((id-300))
             fbx_save_path= glb_save_path.replace(".glb", ".fbx")
-            print(glb_save_path)
 
             script_path = os.path.join(os.getcwd(), "ConvertGLBtoFBX.py")
             script_path= script_path.replace("\\", "/")
 
             blender_path= self.FindBlenderPath()
-            print(blender_path)
+
             cmd = [blender_path, '--background', '--python', script_path, '--', glb_save_path]
 
             try:
@@ -454,8 +444,6 @@ class Mondial(gui.GeDialog):
             else:
                 label= self.autocomplete_search(prompt)
                 return self.HandleMarketPlaceDraw(label)
-
-
 
     def DestroyDialog(self):
         self.DestroyWindow()
