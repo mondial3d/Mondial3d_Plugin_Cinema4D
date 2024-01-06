@@ -122,8 +122,8 @@ class MyUserArea(c4d.gui.GeUserArea):
             return False
         else:
             resized_bmp = c4d.bitmaps.BaseBitmap()
-            resized_bmp.Init(200, 200)
-            self.image.ScaleIt(resized_bmp, 256, 200, c4d.INITBITMAPFLAGS_0)
+            resized_bmp.Init(150, 150)
+            self.image.ScaleIt(resized_bmp, 256, 150, c4d.INITBITMAPFLAGS_0)
             self.image = resized_bmp
 
     def GetMinSize(self):
@@ -157,6 +157,8 @@ class Mondial(gui.GeDialog):
         self.PAGEID= 1
         self.user_areas = []
         self.marketplace_model_url=[]
+        self.search_labels=[]
+        self.search_label= ""
         self.marketplace_activated = False
 
     def CreateLayout(self):
@@ -225,10 +227,37 @@ class Mondial(gui.GeDialog):
                     blender_path = os.path.join(root, name)
                     return blender_path.replace("\\", "/")
 
-    def GetMarketplaceInfo(self):
+    def GetSearchLabel(self):
+        url="https://api.mondial3d.studio/api/Nft/all-labels"
+        response= send_request(url)
+        if isinstance(response, str) and (response.startswith("HTTP Error") or response.startswith("URL Error") or response.startswith("An error occurred")):
+            c4d.gui.MessageDialog(response)
+            return None
+        else:
+            self.search_labels=response
+            return True
+        
+    def autocomplete_search(self, input):
+        user_input = input
+        exact_match = [word for word in self.search_labels if word.lower() == user_input.lower()]
+        suggestions = [word for word in self.search_labels if word.lower().startswith(user_input.lower())]
+        
+        if len(exact_match) > 0:
+            suggestions.remove(exact_match[0])
+            suggestions.insert(0, exact_match[0])
+        
+        if len(suggestions) > 0:
+            self.search_label = suggestions[0]
+            
+        return self.search_label
+    
+    def GetMarketplaceInfo(self, search_label= None):
         save_paths= []
-        self.marketplace_model_url=[]
-        base_url=f"https://api.mondial3d.studio/api/Nft/blendernfts?pageid={self.PAGEID}&take=4"
+        self.marketplace_model_url= []
+        if not search_label == "":
+            base_url=f"https://api.mondial3d.studio/api/Nft/blendernfts?pageid={self.PAGEID}&take=4&Labels={search_label}"
+        else:
+            base_url=f"https://api.mondial3d.studio/api/Nft/blendernfts?pageid={self.PAGEID}&take=4"
         headers = {}
         response= send_request(base_url, headers)
         if isinstance(response, str) and (response.startswith("HTTP Error") or response.startswith("URL Error") or response.startswith("An error occurred")):
@@ -237,6 +266,7 @@ class Mondial(gui.GeDialog):
         else:
             data= response["listNFTs"]
             image_base_url = "https://cdn.mondial3d.com/"
+
 
             for item in data:
                 image_url = image_base_url + item["imageAdress"]
@@ -250,8 +280,11 @@ class Mondial(gui.GeDialog):
                 save_paths.append(save_path)
             return save_paths
 
-    def HandleMarketPlaceDraw(self):
-        save_paths = self.GetMarketplaceInfo()
+    def HandleMarketPlaceDraw(self, search_label= None):
+        if not search_label == "":
+            save_paths = self.GetMarketplaceInfo(search_label)
+        else:
+            save_paths = self.GetMarketplaceInfo()
         self.user_areas=[]
 
         if save_paths:
@@ -261,7 +294,7 @@ class Mondial(gui.GeDialog):
 
             # Searchbar
             self.GroupBegin(id=10004, flags=c4d.BFH_SCALEFIT, cols=2, rows=1) 
-            self.GroupBorderSpace(10, 10, 10, 10)
+            self.GroupBorderSpace(10, 10, 10, 0)
             self.AddEditText(self.MARKETPLACE_SEARCH, flags= c4d.BFH_SCALEFIT, initw=200)
             self.AddButton(self.MARKETPLACE_SEARCH_SUBMIT, flags=c4d.BFH_RIGHT, name="Search")
             self.GroupEnd()
@@ -304,7 +337,7 @@ class Mondial(gui.GeDialog):
         url= f"https://api.mondial3d.studio/api/Nft/Download3D?URL={self.marketplace_model_url[i]}"
         req = request.Request(url)
         response = request.urlopen(req)
-        print(response)
+
         save_path = os.path.join(temp_dir, "{}.glb".format(self.marketplace_model_url[i]))
         with open(save_path, 'wb') as f:
             f.write(response.read())
@@ -318,7 +351,7 @@ class Mondial(gui.GeDialog):
         
         return save_path
 
-    
+
     
     def Command(self, id, msg):
         global auth_token
@@ -378,10 +411,11 @@ class Mondial(gui.GeDialog):
                 return False
         
         elif id == self.MARKETPLACE_ACTIVATE:
+            self.GetSearchLabel()
             if not self.marketplace_activated:
-                return self.HandleMarketPlaceDraw()
+                return self.HandleMarketPlaceDraw(self.search_label)
 
-        elif id >= 300 or id <= 304:
+        elif id >= 300 and id <= 304:
             glb_save_path=self.GetMarketPlaceModel((id-300))
             fbx_save_path= glb_save_path.replace(".glb", ".fbx")
             print(glb_save_path)
@@ -406,12 +440,20 @@ class Mondial(gui.GeDialog):
         elif id == self.MARKETPLACE_PREVIOUS:
             if self.PAGEID > 1:
                 self.PAGEID -= 1
-                return self.HandleMarketPlaceDraw()
+                return self.HandleMarketPlaceDraw(self.search_label)
         
         elif id == self.MARKETPLACE_NEXT:
             self.PAGEID += 1
-            return self.HandleMarketPlaceDraw()
+            return self.HandleMarketPlaceDraw(self.search_label)
             
+        elif id == self.MARKETPLACE_SEARCH_SUBMIT:
+            prompt= self.GetString(self.MARKETPLACE_SEARCH)
+            if prompt== "":
+                c4d.gui.MessageDialog("Please write your search keyword")
+                return False
+            else:
+                label= self.autocomplete_search(prompt)
+                return self.HandleMarketPlaceDraw(label)
 
 
 
