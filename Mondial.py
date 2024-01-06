@@ -39,6 +39,7 @@ class Dialogs:
 dialogs = Dialogs()
 
 class Authentication(gui.GeDialog):
+
     HEADER= 999
     LOGIN_BUTTON= 1000
     SIGNUP_BUTTON= 1001
@@ -102,19 +103,50 @@ class Authentication(gui.GeDialog):
         self.DestroyWindow()
         return True
 
+class MyUserArea(c4d.gui.GeUserArea):
+    def __init__(self, image_path):
+        super(MyUserArea, self).__init__()
+        self.user_areas = []
+        self.image = c4d.bitmaps.BaseBitmap()
+        result, is_movie = self.image.InitWith(image_path)
+
+        if result != c4d.IMAGERESULT_OK:
+            c4d.gui.MessageDialog("Could not load image: " + image_path)
+            return False
+        else:
+            resized_bmp = c4d.bitmaps.BaseBitmap()
+            resized_bmp.Init(200, 200)
+            self.image.ScaleIt(resized_bmp, 256, 200, c4d.INITBITMAPFLAGS_0)
+            self.image = resized_bmp
+
+    def GetMinSize(self):
+        width, height = self.image.GetSize()
+        return (width, height)
+
+    def DrawMsg(self, x1, y1, x2, y2, msg):
+        width, height = self.image.GetSize()
+        self.DrawBitmap(self.image, 0, 0, width, height, 0, 0, width, height, c4d.BMP_NORMAL)
+
+
+
 class Mondial(gui.GeDialog):
-    HEADER= 999
-    SIGNOUT_BUTTON= 1000
-    AI_HEADER= 1001
-    AI_PROMPT= 1002
-    AI_BUTTTON= 1003
-    AI_DOWNLOAD_BUTTON= 1004
-    AI_LOAD= False
-    AI_LABEL= []
-    AI_LINK= ""
-    MARKETPLACE= 1005
-    MARKETPLACE_ACTIVATE= 1006
-    PAGEID= 1
+
+    def __init__(self):
+        self.HEADER= 999
+        self.SIGNOUT_BUTTON= 1000
+        self.AI_HEADER= 1001
+        self.AI_PROMPT= 1002
+        self.AI_BUTTTON= 1003
+        self.AI_DOWNLOAD_BUTTON= 1004
+        self.AI_LOAD= False
+        self.AI_LABEL= []
+        self.AI_LINK= ""
+        self.MARKETPLACE= 1005
+        self.MARKETPLACE_ACTIVATE= 1006
+        self.PAGEID= 1
+        self.user_areas = []
+        self.marketplace_activated = False
+
 
     def CreateLayout(self):
         self.SetTitle("Mondial3d.com")
@@ -122,7 +154,7 @@ class Mondial(gui.GeDialog):
 
         # Signout
         self.GroupBegin(id=10000, flags=c4d.BFH_SCALEFIT, cols=2, rows=1)
-        self.AddStaticText(self.HEADER, flags=c4d.BFH_CENTER, name=user_email)  # Assuming user_email is defined somewhere
+        self.AddStaticText(self.HEADER, flags=c4d.BFH_CENTER, name=user_email)
         self.AddButton(self.SIGNOUT_BUTTON, flags=c4d.BFH_SCALEFIT, name="Sign out")
         self.GroupEnd()
         self.AddSeparatorH(c4d.BFH_SCALEFIT)
@@ -143,9 +175,10 @@ class Mondial(gui.GeDialog):
         #Marketplace
         self.AddStaticText(self.MARKETPLACE, flags=c4d.BFH_CENTER, name="Marketplace", borderstyle=c4d.BORDER_WITH_TITLE_BOLD)
         self.AddButton(self.MARKETPLACE_ACTIVATE, flags=c4d.BFH_SCALEFIT, name="Activate Marketplace")
-        self.GroupBegin(id=10003, flags=c4d.BFH_SCALEFIT, cols=1, rows=1)
-        self.GroupEnd()
         self.AddSeparatorH(c4d.BFH_SCALEFIT)
+
+
+        self.GroupEnd()
 
         return True
     
@@ -182,7 +215,7 @@ class Mondial(gui.GeDialog):
 
     def GetMarketplaceInfo(self):
         save_paths= []
-        base_url=f"https://api.mondial3d.studio/api/Nft/blendernfts?pageid={self.PAGEID}&take=3"
+        base_url=f"https://api.mondial3d.studio/api/Nft/blendernfts?pageid={self.PAGEID}&take=4"
         headers = {}
         response= send_request(base_url, headers)
         if isinstance(response, str) and (response.startswith("HTTP Error") or response.startswith("URL Error") or response.startswith("An error occurred")):
@@ -199,10 +232,11 @@ class Mondial(gui.GeDialog):
                 response = request.urlopen(req)
                 with open(save_path, 'wb') as f:
                     f.write(response.read())
+                save_path= str(save_path).replace("\\", "/")
                 save_paths.append(save_path)
-                return save_paths
+            return save_paths
 
-
+    
     def Command(self, id, msg):
         global auth_token
 
@@ -264,32 +298,27 @@ class Mondial(gui.GeDialog):
                 return False
         
         elif id == self.MARKETPLACE_ACTIVATE:
-            save_paths = self.GetMarketplaceInfo()
-            if save_paths is not None:
-                self.LayoutFlushGroup(10003)
-                for i, save_path in enumerate(save_paths):
-                    save_path = str(save_path).replace("\\", "/")
-                    if not os.path.isfile(save_path):
-                        print(f"File does not exist at {save_path}")
-                        continue
-                    elif not os.access(save_path, os.R_OK):
-                        print(f"File exists but is not readable at {save_path}")
-                        continue
+            if not self.marketplace_activated:
+                save_paths = self.GetMarketplaceInfo()
+                if save_paths:
+                    self.LayoutFlushGroup(10003)
+                    self.GroupBegin(id=10003, flags=c4d.BFH_SCALEFIT, cols=2, rows=len(save_paths)//2 + len(save_paths)%2)
+                    if not self.user_areas:
+                        self.user_areas = [MyUserArea(path) for path in save_paths]
+                        for index, user_area in enumerate(self.user_areas):
+                            self.GroupBegin(id=10004+index, flags=c4d.BFH_SCALEFIT, cols=1, rows=2) 
+                            self.AddUserArea(200 + index, c4d.BFH_SCALEFIT)
+                            self.AttachUserArea(user_area, 200 + index)
+                            user_area.Redraw()
+                            self.AddButton(300 + index, c4d.BFH_SCALEFIT, name="Download and Load Model")
+                            self.GroupEnd() 
+                    self.GroupEnd()
+                    self.LayoutChanged(10003)
 
-                    bmp = c4d.bitmaps.BaseBitmap()
-                    result = bmp.InitWith(save_path)
-                    if result != c4d.IMAGERESULT_OK:
-                        print(f"Failed to load image at {save_path}. Error code: {result}")
-                        continue
+                    self.marketplace_activated = True 
 
-                    # Add bitmap to layout
-                    self.AddStaticBitmap(i + 2000, flags=c4d.BFH_SCALEFIT, bmp=bmp)
-                self.LayoutChanged(10003)
-            return True
-            
-
-            
-
+                    return True
+                
     def DestroyDialog(self):
         self.DestroyWindow()
         return True
