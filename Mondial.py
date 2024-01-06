@@ -20,14 +20,21 @@ def send_request(url, headers=None):
 
         response = request.urlopen(req)
         data= response.read().decode()
-        return json.loads(data)
 
+        if data:
+            return json.loads(data)
+        else:
+            return "Received empty response"
+
+    except json.JSONDecodeError as e:
+        return f"JSON Decode Error: {str(e)}"
     except error.HTTPError as e:
         return f"HTTP Error: {e.code}. Message: {e.reason}"
     except error.URLError as e:
         return f"URL Error. Reason: {e.reason}"
     except Exception as e:
         return f"An error occurred: {str(e)}"
+    
 
 class Dialogs:
     def __init__(self):
@@ -127,8 +134,6 @@ class MyUserArea(c4d.gui.GeUserArea):
         width, height = self.image.GetSize()
         self.DrawBitmap(self.image, 0, 0, width, height, 0, 0, width, height, c4d.BMP_NORMAL)
 
-
-
 class Mondial(gui.GeDialog):
 
     def __init__(self):
@@ -145,6 +150,7 @@ class Mondial(gui.GeDialog):
         self.MARKETPLACE_ACTIVATE= 1006
         self.PAGEID= 1
         self.user_areas = []
+        self.marketplace_model_url=[]
         self.marketplace_activated = False
 
 
@@ -174,7 +180,9 @@ class Mondial(gui.GeDialog):
 
         #Marketplace
         self.AddStaticText(self.MARKETPLACE, flags=c4d.BFH_CENTER, name="Marketplace", borderstyle=c4d.BORDER_WITH_TITLE_BOLD)
+        self.GroupBegin(id=10003, flags=c4d.BFH_SCALEFIT, cols=1, rows=1)
         self.AddButton(self.MARKETPLACE_ACTIVATE, flags=c4d.BFH_SCALEFIT, name="Activate Marketplace")
+        self.GroupEnd()
         self.AddSeparatorH(c4d.BFH_SCALEFIT)
 
 
@@ -215,6 +223,7 @@ class Mondial(gui.GeDialog):
 
     def GetMarketplaceInfo(self):
         save_paths= []
+        self.marketplace_model_url=[]
         base_url=f"https://api.mondial3d.studio/api/Nft/blendernfts?pageid={self.PAGEID}&take=4"
         headers = {}
         response= send_request(base_url, headers)
@@ -228,6 +237,7 @@ class Mondial(gui.GeDialog):
             for item in data:
                 image_url = image_base_url + item["imageAdress"]
                 save_path = os.path.join(temp_dir, item["imageAdress"])
+                self.marketplace_model_url.append(item["url"])
                 req = request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
                 response = request.urlopen(req)
                 with open(save_path, 'wb') as f:
@@ -236,7 +246,40 @@ class Mondial(gui.GeDialog):
                 save_paths.append(save_path)
             return save_paths
 
+    def HandleMarketPlaceDraw(self):
+        save_paths = self.GetMarketplaceInfo()
+        self.user_areas=[]
+        if save_paths:
+            self.LayoutFlushGroup(10003)
+            self.GroupBegin(id=10003, flags=c4d.BFH_SCALEFIT, cols=2, rows=len(save_paths)//2 + len(save_paths)%2)
+            if not self.user_areas:
+                self.user_areas = [MyUserArea(path) for path in save_paths]
+                for index, user_area in enumerate(self.user_areas):
+                    self.GroupBegin(id=10004+index, flags=c4d.BFH_SCALEFIT, cols=1, rows=2) 
+                    self.AddUserArea(200 + index, c4d.BFH_SCALEFIT)
+                    self.AttachUserArea(user_area, 200 + index)
+                    user_area.Redraw()
+                    self.AddButton(300 + index, c4d.BFH_SCALEFIT, name="Download and Load Model")
+                    self.GroupEnd() 
+            self.GroupEnd()
+            self.LayoutChanged(10003)
+            self.marketplace_activated = True 
+
+            return True
+        return False
     
+    def GetMarketPlaceModel(self, i):
+        url= f"https://api.mondial3d.studio/api/Nft/Download3D?URL={self.marketplace_model_url[i]}"
+        req = request.Request(url)
+        response = request.urlopen(req)
+        save_path = os.path.join(temp_dir, "{}.glb".format(self.marketplace_model_url[i]))
+        with open(save_path, 'wb') as f:
+            f.write(response.read())
+        save_path= str(save_path).replace("\\", "/")
+        print(save_path)
+        return save_path
+
+
     def Command(self, id, msg):
         global auth_token
 
@@ -275,13 +318,10 @@ class Mondial(gui.GeDialog):
 
         elif id == self.AI_DOWNLOAD_BUTTON:
             glb_save_path= self.DownloadGLB(self.AI_LINK)
-            print(glb_save_path)
             fbx_save_path= glb_save_path.replace(".glb", ".fbx")
-            print(fbx_save_path)
 
             script_path = os.path.join(os.getcwd(), "ConvertGLBtoFBX.py")
             script_path= script_path.replace("\\", "/")
-            print(script_path)
 
             blender_path= self.FindBlenderPath()
             print(blender_path)
@@ -299,26 +339,29 @@ class Mondial(gui.GeDialog):
         
         elif id == self.MARKETPLACE_ACTIVATE:
             if not self.marketplace_activated:
-                save_paths = self.GetMarketplaceInfo()
-                if save_paths:
-                    self.LayoutFlushGroup(10003)
-                    self.GroupBegin(id=10003, flags=c4d.BFH_SCALEFIT, cols=2, rows=len(save_paths)//2 + len(save_paths)%2)
-                    if not self.user_areas:
-                        self.user_areas = [MyUserArea(path) for path in save_paths]
-                        for index, user_area in enumerate(self.user_areas):
-                            self.GroupBegin(id=10004+index, flags=c4d.BFH_SCALEFIT, cols=1, rows=2) 
-                            self.AddUserArea(200 + index, c4d.BFH_SCALEFIT)
-                            self.AttachUserArea(user_area, 200 + index)
-                            user_area.Redraw()
-                            self.AddButton(300 + index, c4d.BFH_SCALEFIT, name="Download and Load Model")
-                            self.GroupEnd() 
-                    self.GroupEnd()
-                    self.LayoutChanged(10003)
+                return self.HandleMarketPlaceDraw()
 
-                    self.marketplace_activated = True 
+        elif id>= 300 or id <= 304:
+            glb_save_path=self.GetMarketPlaceModel((id-300))
+            fbx_save_path= glb_save_path.replace(".glb", ".fbx")
 
-                    return True
-                
+            script_path = os.path.join(os.getcwd(), "ConvertGLBtoFBX.py")
+            script_path= script_path.replace("\\", "/")
+
+            blender_path= self.FindBlenderPath()
+            print(blender_path)
+            cmd = [blender_path, '--background', '--python', script_path, '--', glb_save_path]
+
+            try:
+                result = subprocess.run(cmd, check=True, capture_output=True)
+                print(result.stdout.decode('utf-8'))
+                c4d.documents.LoadFile(fbx_save_path)
+
+            except subprocess.CalledProcessError as e:
+                print(f"An error occurred while converting .glb to .fbx: {str(e)}")
+                print(e.stderr.decode('utf-8'))
+                return False
+
     def DestroyDialog(self):
         self.DestroyWindow()
         return True
