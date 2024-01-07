@@ -2,10 +2,13 @@ import os
 import tempfile
 import fnmatch
 from urllib import request, error
+from urllib.request import Request, urlopen
 import json
 import subprocess
+import base64
+import mimetypes
 import c4d
-from c4d import gui
+from c4d import gui, documents, plugins, bitmaps
 
 auth_token=""
 user_email=""
@@ -160,6 +163,9 @@ class Mondial(gui.GeDialog):
         self.search_labels=[]
         self.search_label= ""
 
+        self.PUBLISH_HEADER= 1011
+        self.PUBLISH_SUBMIT= 1012
+
     def CreateLayout(self):
         self.SetTitle("Mondial3d.com")
         self.GroupBorderSpace(10, 10, 10, 10)
@@ -191,7 +197,11 @@ class Mondial(gui.GeDialog):
         self.GroupEnd()
         self.AddSeparatorH(c4d.BFH_SCALEFIT)
 
-
+        # Publish to Server
+        self.AddStaticText(self.PUBLISH_HEADER, flags=c4d.BFH_CENTER, name="Publishment", borderstyle=c4d.BORDER_WITH_TITLE_BOLD)
+        self.AddButton(self.PUBLISH_SUBMIT, flags=c4d.BFH_SCALEFIT, name="Publish to server")
+        self.AddSeparatorH(c4d.BFH_SCALEFIT)
+        
         self.GroupEnd()
 
         return True
@@ -258,7 +268,7 @@ class Mondial(gui.GeDialog):
         else:
             base_url=f"https://api.mondial3d.studio/api/Nft/blendernfts?pageid={self.PAGEID}&take=4"
         headers = {}
-        print(base_url)
+
         response= send_request(base_url, headers)
         if isinstance(response, str) and (response.startswith("HTTP Error") or response.startswith("URL Error") or response.startswith("An error occurred")):
             c4d.gui.MessageDialog(response)
@@ -344,6 +354,90 @@ class Mondial(gui.GeDialog):
             return None
         
         return save_path
+
+    def PublishToServer(self):
+        doc = documents.GetActiveDocument()
+        objects = doc.GetObjects()
+        for obj in objects:
+            obj.SetBit(c4d.BIT_ACTIVE)
+        
+        FBX_EXPORTER_ID = 1026370
+        save_path = os.path.join(temp_dir, "export.fbx")
+        settings = c4d.BaseContainer()
+        settings[c4d.FBXEXPORT_ASCII] = True
+
+        if plugins.FindPlugin(FBX_EXPORTER_ID, c4d.PLUGINTYPE_SCENESAVER) is not None:
+            if documents.SaveDocument(doc, save_path, c4d.SAVEDOCUMENTFLAGS_DONTADDTORECENTLIST, FBX_EXPORTER_ID):
+                print("FBX exported successfully.")
+                save_path= str(save_path).replace("\\", "/")
+                return save_path
+            else:
+                print("Failed to export FBX.")
+                return False
+        else:
+            print("FBX Exporter plugin not found.")
+            return False
+
+    def CreateProjectCover(self, projectID):  
+        outputPath = os.path.join(temp_dir, f"{projectID}.png")
+
+        doc = c4d.documents.GetActiveDocument()
+        rdata = doc.GetActiveRenderData()
+        rdata[c4d.RDATA_XRES] = 800 
+        rdata[c4d.RDATA_YRES] = 600
+        bmp = c4d.bitmaps.BaseBitmap()
+        bmp.Init(x=800, y=600)
+        result = c4d.documents.RenderDocument(doc, rdata.GetData(), bmp, c4d.RENDERFLAGS_EXTERNAL)
+        if result != c4d.RENDERRESULT_OK:
+            return
+        
+        bmp.Save(outputPath, c4d.FILTER_PNG)
+        outputPath= str(outputPath).replace("\\","/")
+        return outputPath
+
+ 
+    def ServerProject(self, model_path):
+        global auth_token
+        # Create New Project
+        create_url = "https://api.mondial3d.studio/api/Nft/create-project"
+        headers = {"Authorization": "Bearer " + auth_token}
+        projectID= send_request(create_url, headers)
+        # Update Project
+        headers = {"Authorization": "Bearer " + auth_token, "projectid": projectID}
+        update_url = "https://api.mondial3d.studio/api/Nft/update-project"
+        cover_path= self.CreateProjectCover(projectID=projectID)
+
+        # Define boundary
+        boundary = 'wL36Yn8afVp8Ag7AmP8qZ0SA4n1v9T'
+
+        with open(model_path, 'rb') as f, open(cover_path, 'rb') as img:
+            encoded_string = base64.b64encode(img.read()).decode('utf-8')
+            data = {"projectid": projectID,
+                    "cover": f"data:image/jpeg;base64,{encoded_string}"}
+
+            # Prepare payload
+            body = bytearray()
+            for key, value in data.items():
+                body.extend('--{}\r\n'.format(boundary).encode())
+                body.extend('Content-Disposition: form-data; name="{}"\r\n\r\n'.format(key).encode())
+                body.extend('{}\r\n'.format(value).encode())
+
+            body.extend('--{}\r\n'.format(boundary).encode())
+            body.extend('Content-Disposition: form-data; name="file"; filename="{}"\r\n'.format(os.path.basename(model_path)).encode())
+            body.extend('Content-Type: {}\r\n\r\n'.format(mimetypes.guess_type(model_path)[0] or 'application/octet-stream').encode())
+            body.extend(f.read())
+            body.extend('\r\n--{}--\r\n'.format(boundary).encode())
+
+            headers['Content-Type'] = 'multipart/form-data; boundary={}'.format(boundary)
+            req = Request(update_url, data=body, headers=headers)
+            response = urlopen(req)
+
+            if 200 <= response.getcode() < 300:
+                c4d.gui.MessageDialog(f"Successfully publish your project. Project ID: {projectID}")
+            else:
+                c4d.gui.MessageDialog("Failed to publish to server, Check your internet conncetion...")
+           
+
 
     def Command(self, id, msg):
         global auth_token
@@ -445,6 +539,23 @@ class Mondial(gui.GeDialog):
                 label= self.autocomplete_search(prompt)
                 return self.HandleMarketPlaceDraw(label)
 
+        elif id == self.PUBLISH_SUBMIT:
+            response= self.PublishToServer()
+            if not response == False:
+                fbx_save_path= response
+                glb_save_path= fbx_save_path.replace(".fbx", ".glb")
+                script_path = os.path.join(os.getcwd(), "ConvertFBXtoGLB.py")
+                script_path= script_path.replace("\\", "/")
+                blender_path= self.FindBlenderPath()
+                cmd = [blender_path, '--background', '--python', script_path, '--', fbx_save_path]
+                try:
+                    result = subprocess.run(cmd, check=True, capture_output=True)
+                    self.ServerProject(glb_save_path)
+                except subprocess.CalledProcessError as e:
+                    print(f"An error occurred while converting .glb to .fbx: {str(e)}")
+                    print(e.stderr.decode('utf-8'))
+                    return False
+                
     def DestroyDialog(self):
         self.DestroyWindow()
         return True
