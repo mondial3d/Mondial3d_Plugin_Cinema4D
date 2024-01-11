@@ -49,11 +49,12 @@ class Dialogs:
 dialogs = Dialogs()
 
 class Authentication(gui.GeDialog):
-
-    HEADER= 999
-    LOGIN_BUTTON= 1000
-    SIGNUP_BUTTON= 1001
-    AUTH_TOKEN= 1002
+    
+    def __init__(self):
+        self.HEADER= 999
+        self.LOGIN_BUTTON= 1000
+        self.SIGNUP_BUTTON= 1001
+        self.AUTH_TOKEN= 1002
 
     def CreateLayout(self):
         self.SetTitle("Mondial3d.com")
@@ -105,6 +106,7 @@ class Authentication(gui.GeDialog):
                     except json.JSONDecodeError:
                         c4d.gui.MessageDialog("Invalid JSON received from server.")
                 return True
+        
         elif id== self.SIGNUP_BUTTON:
             c4d.storage.GeExecuteFile('http://www.mondial3d.com')
             return True
@@ -166,6 +168,11 @@ class Mondial(gui.GeDialog):
         self.PUBLISH_HEADER= 1011
         self.PUBLISH_SUBMIT= 1012
 
+        self.MY_PROJECT_HEADER= 1013
+        self.MY_PROJECT_ACTIVATE= 1014  
+        self.my_project_area= []
+        self.my_project_url=[]
+
     def CreateLayout(self):
         self.SetTitle("Mondial3d.com")
         self.GroupBorderSpace(10, 10, 10, 10)
@@ -201,11 +208,19 @@ class Mondial(gui.GeDialog):
         self.AddStaticText(self.PUBLISH_HEADER, flags=c4d.BFH_CENTER, name="Publishment", borderstyle=c4d.BORDER_WITH_TITLE_BOLD)
         self.AddButton(self.PUBLISH_SUBMIT, flags=c4d.BFH_SCALEFIT, name="Publish to server")
         self.AddSeparatorH(c4d.BFH_SCALEFIT)
-        
+
+        # Myproject
+        self.AddStaticText(self.MY_PROJECT_HEADER, flags=c4d.BFH_CENTER, name="My Projects", borderstyle=c4d.BORDER_WITH_TITLE_BOLD)
+        self.GroupBegin(id=10007, flags=c4d.BFH_SCALEFIT, cols=1, rows=2)
+        self.AddButton(self.MY_PROJECT_ACTIVATE, flags=c4d.BFH_SCALEFIT, name="Load My projects")
+        self.GroupEnd()
+        self.AddSeparatorH(c4d.BFH_SCALEFIT)
+
         self.GroupEnd()
 
         return True
-    
+
+
     def AIPromptScene(self, prompt, auth_token):
         base_url=f"https://api.mondial3d.studio/api/Nft/ai-Add-complete-scene?categoryName={prompt}"
         headers = {"Authorization" : "Bearer "+ auth_token}
@@ -264,9 +279,9 @@ class Mondial(gui.GeDialog):
         save_paths= []
         self.marketplace_model_url= []
         if not search_label == "":
-            base_url=f"https://api.mondial3d.studio/api/Nft/blendernfts?pageid={self.PAGEID}&take=4&Labels={search_label}"
+            base_url=f"https://api.mondial3d.studio/api/Nft/blendernfts?pageid={self.PAGEID}&take=5&Labels={search_label}"
         else:
-            base_url=f"https://api.mondial3d.studio/api/Nft/blendernfts?pageid={self.PAGEID}&take=4"
+            base_url=f"https://api.mondial3d.studio/api/Nft/blendernfts?pageid={self.PAGEID}&take=5"
         headers = {}
 
         response= send_request(base_url, headers)
@@ -316,13 +331,13 @@ class Mondial(gui.GeDialog):
             self.GroupEnd()
 
             # Items
-            self.GroupBegin(id=10006, flags=c4d.BFH_SCALEFIT, cols=2, rows=len(save_paths)//2 + len(save_paths)%2)
+            self.GroupBegin(id=10006, flags=c4d.BFH_SCALEFIT, cols=5, rows=1)
             if not self.user_areas:
                 self.user_areas = [MyUserArea(path) for path in save_paths]
                 for index, user_area in enumerate(self.user_areas):
                     self.GroupBegin(id=10007+index, flags=c4d.BFH_SCALEFIT, cols=1, rows=2) 
                     self.GroupBorderSpace(5, 5, 5, 5)
-                    self.AddUserArea(200 + index, c4d.BFH_SCALEFIT)
+                    self.AddUserArea(200 + index, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT)
                     self.AttachUserArea(user_area, 200 + index)
                     user_area.Redraw()
                     self.AddButton(300 + index, c4d.BFH_SCALEFIT, name="Download and Load Model")
@@ -395,7 +410,6 @@ class Mondial(gui.GeDialog):
         outputPath= str(outputPath).replace("\\","/")
         return outputPath
 
- 
     def ServerProject(self, model_path):
         global auth_token
         # Create New Project
@@ -436,8 +450,78 @@ class Mondial(gui.GeDialog):
                 c4d.gui.MessageDialog(f"Successfully publish your project. Project ID: {projectID}")
             else:
                 c4d.gui.MessageDialog("Failed to publish to server, Check your internet conncetion...")
-           
 
+    def GetMyProjectInfo(self):
+        save_paths= []
+        self.my_project_url=[]
+        global auth_token, temp_dir
+        project_list_url="https://api.mondial3d.studio/api/Nft/Get-Project-List" 
+        headers={"Authorization" : "Bearer "+ auth_token}
+        responses= send_request(project_list_url, headers)
+        for r in responses:
+            save_path = os.path.join(temp_dir, str(r["id"])+".png" )
+            req = request.Request(r["cover"], headers={'User-Agent': 'Mozilla/5.0'})
+            try:
+                response = request.urlopen(req)
+                # If the status code is 404, skip this iteration
+                if response.getcode() == 404:
+                    print(f'Failed to download image {r["id"]}: 404 Not Found')
+                    continue
+                with open(save_path, 'wb') as out_file:
+                    out_file.write(response.read())
+                save_path= str(save_path).replace("\\", "/")
+                self.my_project_url.append(str(r["id"]))
+                save_paths.append(save_path)
+            except Exception as e:
+                print(f'Failed to save image {r["id"]}: {str(e)}')
+        
+        return save_paths
+
+    def HandleMyProjectDraw(self):
+        save_paths= self.GetMyProjectInfo()
+        self.my_project_area=[]
+
+        if save_paths:
+            # Main group
+            self.LayoutFlushGroup(10007)
+            self.GroupBegin(id=10007, flags=c4d.BFH_SCALEFIT, cols=1, rows=2)
+
+            # Items
+            self.GroupBegin(id=10008, flags=c4d.BFH_SCALEFIT, cols=5, rows=len(save_paths)//5 + len(save_paths)%5)
+            if not self.my_project_area:
+                self.my_project_area = [MyUserArea(path) for path in save_paths]
+                for index, project_area in enumerate(self.my_project_area):
+                    self.GroupBegin(id=10007+index, flags=c4d.BFH_SCALEFIT, cols=1, rows=2) 
+                    self.GroupBorderSpace(5, 5, 5, 5)
+                    self.AddUserArea(400 + index, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT)
+                    self.AttachUserArea(project_area, 400 + index)
+                    project_area.Redraw()
+                    self.AddButton(500 + int(self.my_project_url[index]), c4d.BFH_SCALEFIT, name="Download and Load Project")
+                    self.GroupEnd() 
+            self.GroupEnd()
+            # End main group
+            self.GroupEnd()
+            self.LayoutChanged(10007)
+
+            return True
+        return False
+            
+    def GetMyprojectModel(self, i):
+        global auth_token, temp_dir
+        try:
+            request_url = f"https://api.mondial3d.studio/api/Nft/open-project?projectid={i}"
+            headers = {"Authorization" : "Bearer " + auth_token}
+            response = send_request(request_url, headers)
+            model_url = response["jsonFile"]
+            file = request.urlopen(model_url)
+            save_path = os.path.join(temp_dir, f"{i}.glb")
+            with open(save_path, 'wb') as f:
+                f.write(file.read()) 
+            save_path = str(save_path).replace("\\","/")
+            return save_path
+        except Exception as e:
+            print("An error occurred:", e)
+            return None
 
     def Command(self, id, msg):
         global auth_token
@@ -500,7 +584,7 @@ class Mondial(gui.GeDialog):
             self.GetSearchLabel()
             return self.HandleMarketPlaceDraw(self.search_label)
 
-        elif id >= 300 and id <= 304:
+        elif id >= 300 and id <= 305:
             glb_save_path=self.GetMarketPlaceModel((id-300))
             fbx_save_path= glb_save_path.replace(".glb", ".fbx")
 
@@ -555,7 +639,31 @@ class Mondial(gui.GeDialog):
                     print(f"An error occurred while converting .glb to .fbx: {str(e)}")
                     print(e.stderr.decode('utf-8'))
                     return False
-                
+
+        elif id == self.MY_PROJECT_ACTIVATE:
+            return self.HandleMyProjectDraw()
+
+        elif str(id-500) in self.my_project_url:
+            glb_save_path= self.GetMyprojectModel((id-500))
+            fbx_save_path= glb_save_path.replace(".glb", ".fbx")
+
+            script_path = os.path.join(os.getcwd(), "ConvertGLBtoFBX.py")
+            script_path= script_path.replace("\\", "/")
+
+            blender_path= self.FindBlenderPath()
+
+            cmd = [blender_path, '--background', '--python', script_path, '--', glb_save_path]
+
+            try:
+                result = subprocess.run(cmd, check=True, capture_output=True)
+                print(result.stdout.decode('utf-8'))
+                c4d.documents.LoadFile(fbx_save_path)
+
+            except subprocess.CalledProcessError as e:
+                print(f"An error occurred while converting .glb to .fbx: {str(e)}")
+                print(e.stderr.decode('utf-8'))
+                return False
+
     def DestroyDialog(self):
         self.DestroyWindow()
         return True
