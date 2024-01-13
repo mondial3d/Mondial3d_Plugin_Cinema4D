@@ -10,7 +10,7 @@ import mimetypes
 import c4d
 from c4d import gui, documents, plugins, bitmaps
 
-PLUGIN_ID = 1000001
+PLUGIN_ID = 1062540
 
 class MyPlugin(c4d.plugins.CommandData):
     def __init__(self):
